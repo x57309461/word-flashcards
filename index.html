@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>翻卡记单词</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f5f5f5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      width: 100%;
+      max-width: 420px;
+      padding: 40px 24px;
+      text-align: center;
+      min-height: 320px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .word {
+      font-size: 36px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 12px;
+      word-break: break-word;
+    }
+    .phonetic {
+      font-size: 16px;
+      color: #888;
+      margin-bottom: 24px;
+    }
+    .meaning {
+      font-size: 18px;
+      color: #333;
+      line-height: 1.6;
+      margin-bottom: 24px;
+      display: none;
+    }
+    .meaning.show { display: block; }
+    .btn {
+      padding: 12px 32px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary {
+      background: #2563eb;
+      color: #fff;
+      width: 100%;
+    }
+    .btn-group {
+      display: none;
+      gap: 12px;
+    }
+    .btn-group.show { display: flex; }
+    .btn-known {
+      background: #16a34a;
+      color: #fff;
+      flex: 1;
+    }
+    .btn-unknown {
+      background: #dc2626;
+      color: #fff;
+      flex: 1;
+    }
+    .progress {
+      font-size: 14px;
+      color: #999;
+      margin-top: 20px;
+    }
+    .done {
+      font-size: 20px;
+      color: #16a34a;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div id="content">
+      <div class="word" id="word">加载中...</div>
+      <div class="phonetic" id="phonetic"></div>
+      <div class="meaning" id="meaning"></div>
+      <button class="btn btn-primary" id="showBtn" onclick="showMeaning()">显示释义</button>
+      <div class="btn-group" id="btnGroup">
+        <button class="btn btn-known" onclick="markKnown()">认识</button>
+        <button class="btn btn-unknown" onclick="markUnknown()">不认识</button>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+  </div>
+
+  <script>
+    const WORDBOOK_ID = 1;
+    const STORAGE_KEY = `known_words_${WORDBOOK_ID}`;
+
+    let words = [];
+    let currentIndex = 0;
+
+    // 从 localStorage 读取已认识的单词
+    function getKnownWords() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    }
+
+    // 保存已认识的单词
+    function saveKnownWord(word) {
+      const known = getKnownWords();
+      if (!known.includes(word)) {
+        known.push(word);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(known));
+      }
+    }
+
+    // 加载单词列表
+    async function loadWords() {
+      const res = await fetch(`/api/words?wordbook_id=${WORDBOOK_ID}`);
+      const data = await res.json();
+
+      const known = getKnownWords();
+      // 过滤掉已认识的单词
+      words = data.words.filter(w => !known.includes(w.word));
+
+      if (words.length === 0) {
+        document.getElementById('content').innerHTML =
+          '<div class="done">🎉 全部学完！</div>';
+        return;
+      }
+
+      currentIndex = 0;
+      renderWord();
+    }
+
+    // 渲染当前单词
+    function renderWord() {
+      if (currentIndex >= words.length) {
+        document.getElementById('content').innerHTML =
+          '<div class="done">🎉 本轮学完！</div>';
+        return;
+      }
+
+      const w = words[currentIndex];
+      document.getElementById('word').textContent = w.word;
+      document.getElementById('phonetic').textContent = w.phonetic ? `/${w.phonetic}/` : '';
+      document.getElementById('meaning').textContent = w.meaning || '';
+      document.getElementById('meaning').classList.remove('show');
+      document.getElementById('showBtn').style.display = 'block';
+      document.getElementById('btnGroup').classList.remove('show');
+      document.getElementById('progress').textContent =
+        `${currentIndex + 1} / ${words.length}`;
+    }
+
+    // 显示释义
+    function showMeaning() {
+      document.getElementById('meaning').classList.add('show');
+      document.getElementById('showBtn').style.display = 'none';
+      document.getElementById('btnGroup').classList.add('show');
+    }
+
+    // 认识：存入 localStorage，跳到下一个
+    function markKnown() {
+      saveKnownWord(words[currentIndex].word);
+      currentIndex++;
+      renderWord();
+    }
+
+    // 不认识：直接跳到下一个
+    function markUnknown() {
+      currentIndex++;
+      renderWord();
+    }
+
+    loadWords();
+  </script>
+</body>
+</html>
