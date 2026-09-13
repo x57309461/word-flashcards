@@ -28,6 +28,16 @@
       flex-direction: column;
       justify-content: center;
     }
+    select {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      background: #fff;
+      color: #333;
+    }
     .word {
       font-size: 36px;
       font-weight: 700;
@@ -67,32 +77,38 @@
       gap: 12px;
     }
     .btn-group.show { display: flex; }
-    .btn-known {
-      background: #16a34a;
-      color: #fff;
-      flex: 1;
-    }
-    .btn-unknown {
-      background: #dc2626;
-      color: #fff;
-      flex: 1;
-    }
+    .btn-known { background: #16a34a; color: #fff; flex: 1; }
+    .btn-unknown { background: #dc2626; color: #fff; flex: 1; }
     .progress {
       font-size: 14px;
       color: #999;
       margin-top: 20px;
     }
-    .done {
-      font-size: 20px;
-      color: #16a34a;
-      font-weight: 600;
+    .done { font-size: 20px; color: #16a34a; font-weight: 600; }
+    .back {
+      font-size: 14px;
+      color: #2563eb;
+      cursor: pointer;
+      margin-top: 16px;
     }
   </style>
 </head>
 <body>
   <div class="card">
-    <div id="content">
-      <div class="word" id="word">加载中...</div>
+    <!-- 选择界面 -->
+    <div id="picker">
+      <select id="stageSelect">
+        <option value="">选择阶段...</option>
+      </select>
+      <select id="bookSelect">
+        <option value="">选择词书...</option>
+      </select>
+      <button class="btn btn-primary" onclick="startLearning()">开始学习</button>
+    </div>
+
+    <!-- 翻卡界面 -->
+    <div id="content" style="display:none;">
+      <div class="word" id="word"></div>
       <div class="phonetic" id="phonetic"></div>
       <div class="meaning" id="meaning"></div>
       <button class="btn btn-primary" id="showBtn" onclick="showMeaning()">显示释义</button>
@@ -101,43 +117,95 @@
         <button class="btn btn-unknown" onclick="markUnknown()">不认识</button>
       </div>
       <div class="progress" id="progress"></div>
+      <div class="back" onclick="backToPicker()">← 返回选择</div>
     </div>
   </div>
 
   <script>
-    const WORDBOOK_ID = 2;
-    const STORAGE_KEY = `known_words_${WORDBOOK_ID}`;
-
+    let allWordbooks = [];
+    let currentWordbookId = null;
     let words = [];
     let currentIndex = 0;
 
-    // 从 localStorage 读取已认识的单词
+    // 加载词书列表
+    async function loadWordbooks() {
+      const res = await fetch('/api/wordbooks');
+      const data = await res.json();
+      allWordbooks = data.wordbooks || [];
+
+      // 提取所有阶段（去重）
+      const stages = [...new Set(allWordbooks.map(w => w.stage))];
+      const stageSelect = document.getElementById('stageSelect');
+      stages.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s;
+        stageSelect.appendChild(opt);
+      });
+    }
+
+    // 选择阶段后，填充词书下拉框
+    document.getElementById('stageSelect').addEventListener('change', (e) => {
+      const stage = e.target.value;
+      const bookSelect = document.getElementById('bookSelect');
+      bookSelect.innerHTML = '<option value="">选择词书...</option>';
+
+      if (!stage) return;
+
+      allWordbooks
+        .filter(w => w.stage === stage)
+        .forEach(w => {
+          const opt = document.createElement('option');
+          opt.value = w.id;
+          opt.textContent = w.name;
+          bookSelect.appendChild(opt);
+        });
+    });
+
+    // 开始学习
+    function startLearning() {
+      const bookId = document.getElementById('bookSelect').value;
+      if (!bookId) {
+        alert('请先选择阶段和词书');
+        return;
+      }
+      currentWordbookId = Number(bookId);
+      document.getElementById('picker').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      loadWords();
+    }
+
+    // 返回选择界面
+    function backToPicker() {
+      document.getElementById('picker').style.display = 'block';
+      document.getElementById('content').style.display = 'none';
+      words = [];
+      currentIndex = 0;
+    }
+
     function getKnownWords() {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(`known_words_${currentWordbookId}`);
       return raw ? JSON.parse(raw) : [];
     }
 
-    // 保存已认识的单词
     function saveKnownWord(word) {
       const known = getKnownWords();
       if (!known.includes(word)) {
         known.push(word);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(known));
+        localStorage.setItem(`known_words_${currentWordbookId}`, JSON.stringify(known));
       }
     }
 
-    // 加载单词列表
     async function loadWords() {
-      const res = await fetch(`/api/words?wordbook_id=${WORDBOOK_ID}`);
+      const res = await fetch(`/api/words?wordbook_id=${currentWordbookId}`);
       const data = await res.json();
 
       const known = getKnownWords();
-      // 过滤掉已认识的单词
       words = data.words.filter(w => !known.includes(w.word));
 
       if (words.length === 0) {
         document.getElementById('content').innerHTML =
-          '<div class="done">🎉 全部学完！</div>';
+          '<div class="done">🎉 全部学完！</div><div class="back" onclick="backToPicker()">← 返回选择</div>';
         return;
       }
 
@@ -145,11 +213,10 @@
       renderWord();
     }
 
-    // 渲染当前单词
     function renderWord() {
       if (currentIndex >= words.length) {
         document.getElementById('content').innerHTML =
-          '<div class="done">🎉 本轮学完！</div>';
+          '<div class="done">🎉 本轮学完！</div><div class="back" onclick="backToPicker()">← 返回选择</div>';
         return;
       }
 
@@ -164,27 +231,24 @@
         `${currentIndex + 1} / ${words.length}`;
     }
 
-    // 显示释义
     function showMeaning() {
       document.getElementById('meaning').classList.add('show');
       document.getElementById('showBtn').style.display = 'none';
       document.getElementById('btnGroup').classList.add('show');
     }
 
-    // 认识：存入 localStorage，跳到下一个
     function markKnown() {
       saveKnownWord(words[currentIndex].word);
       currentIndex++;
       renderWord();
     }
 
-    // 不认识：直接跳到下一个
     function markUnknown() {
       currentIndex++;
       renderWord();
     }
 
-    loadWords();
+    loadWordbooks();
   </script>
 </body>
 </html>
