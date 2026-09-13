@@ -48,8 +48,16 @@
     .phonetic {
       font-size: 16px;
       color: #888;
-      margin-bottom: 24px;
+      margin-bottom: 12px;
     }
+    .countdown {
+      font-size: 15px;
+      font-weight: 600;
+      color: #d97706;
+      margin-bottom: 16px;
+      min-height: 22px;
+    }
+    .countdown.warning { color: #dc2626; }
     .meaning {
       font-size: 18px;
       color: #333;
@@ -122,6 +130,13 @@
       border-radius: 10px;
       margin-bottom: 12px;
     }
+    .setting-label {
+      font-size: 13px;
+      color: #999;
+      text-align: left;
+      margin-bottom: 6px;
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
@@ -132,6 +147,17 @@
       </select>
       <select id="bookSelect">
         <option value="">选择词书...</option>
+      </select>
+      <div class="setting-label">读秒倒计时</div>
+      <select id="countdownSelect">
+        <option value="0">不倒计时</option>
+        <option value="3">3 秒</option>
+        <option value="5">5 秒</option>
+        <option value="8">8 秒</option>
+        <option value="10">10 秒</option>
+        <option value="15">15 秒</option>
+        <option value="20">20 秒</option>
+        <option value="30">30 秒</option>
       </select>
       <button class="btn btn-primary" onclick="startLearning()">开始学习</button>
       <button class="btn btn-difficult" onclick="startDifficult()">复习不认识词</button>
@@ -148,10 +174,15 @@
 
     let allWordbooks = [];
     let currentWordbookId = null;
-    let currentMode = 'due'; // 'due' 或 'difficult'
+    let currentMode = 'due';
     let words = [];
     let currentIndex = 0;
     let currentCard = null;
+
+    // ===== 倒计时状态 =====
+    let countdownSeconds = Number(localStorage.getItem('countdown_seconds') || 0);
+    let countdownTimer = null;
+    let countdownRemaining = 0;
 
     // ===== 加载词书列表 =====
     async function loadWordbooks() {
@@ -184,6 +215,14 @@
           opt.textContent = w.name;
           bookSelect.appendChild(opt);
         });
+    });
+
+    // ===== 倒计时设置 =====
+    const countdownSelect = document.getElementById('countdownSelect');
+    countdownSelect.value = String(countdownSeconds);
+    countdownSelect.addEventListener('change', (e) => {
+      countdownSeconds = Number(e.target.value);
+      localStorage.setItem('countdown_seconds', countdownSeconds);
     });
 
     // ===== 开始学习（待复习） =====
@@ -244,6 +283,7 @@
         ${tag}
         <div class="word" id="word"></div>
         <div class="phonetic" id="phonetic"></div>
+        <div class="countdown" id="countdown"></div>
         <div class="meaning" id="meaning"></div>
         <button class="btn btn-primary" id="showBtn" onclick="showMeaning()">显示释义</button>
         <div class="btn-group" id="btnGroup">
@@ -258,6 +298,8 @@
 
     // ===== 渲染当前单词 =====
     function renderWord() {
+      stopCountdown();
+
       if (currentIndex >= words.length) {
         const msg = currentMode === 'difficult' ? '🎉 错词复习完成！' : '🎉 本轮完成！';
         document.getElementById('content').innerHTML =
@@ -300,10 +342,54 @@
       document.getElementById('relearnBtn').style.display = 'block';
       document.getElementById('progress').textContent =
         `${currentIndex + 1} / ${words.length}`;
+
+      // 启动倒计时
+      startCountdown();
+    }
+
+    // ===== 倒计时逻辑 =====
+    function startCountdown() {
+      const el = document.getElementById('countdown');
+      if (!el) return;
+
+      if (!countdownSeconds || countdownSeconds <= 0) {
+        el.textContent = '';
+        return;
+      }
+
+      countdownRemaining = countdownSeconds;
+      el.textContent = `⏱ ${countdownRemaining}s`;
+      el.classList.remove('warning');
+
+      countdownTimer = setInterval(() => {
+        countdownRemaining--;
+        const el2 = document.getElementById('countdown');
+        if (!el2) return;
+        if (countdownRemaining <= 0) {
+          stopCountdown();
+          // 时间到，自动显示释义
+          showMeaning();
+        } else {
+          el2.textContent = `⏱ ${countdownRemaining}s`;
+          if (countdownRemaining <= 3) {
+            el2.classList.add('warning');
+          }
+        }
+      }, 1000);
+    }
+
+    function stopCountdown() {
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
     }
 
     // ===== 显示释义 =====
     function showMeaning() {
+      stopCountdown();
+      const el = document.getElementById('countdown');
+      if (el) el.textContent = '';
       document.getElementById('meaning').classList.add('show');
       document.getElementById('showBtn').style.display = 'none';
       document.getElementById('btnGroup').classList.add('show');
@@ -311,8 +397,14 @@
     }
 
     // ===== 认识 / 不认识 =====
-    async function markKnown() { await reviewCurrentWord(Rating.Good); }
-    async function markUnknown() { await reviewCurrentWord(Rating.Again); }
+    async function markKnown() {
+      stopCountdown();
+      await reviewCurrentWord(Rating.Good);
+    }
+    async function markUnknown() {
+      stopCountdown();
+      await reviewCurrentWord(Rating.Again);
+    }
 
     // ===== FSRS 调度 + 保存 =====
     async function reviewCurrentWord(rating) {
@@ -339,14 +431,9 @@
         currentCard = updatedCard;
         currentIndex++;
 
-        // 在错词模式下，如果标记“认识”，从当前列表中移除
         if (currentMode === 'difficult' && rating !== 1) {
           words.splice(currentIndex - 1, 1);
           currentIndex--;
-          if (words.length === 0) {
-            renderWord();
-            return;
-          }
         }
 
         renderWord();
@@ -377,6 +464,7 @@
 
     // ===== 重新学习当前这个词 =====
     async function relearnCurrent() {
+      stopCountdown();
       const w = words[currentIndex];
       if (!w) return;
 
@@ -399,6 +487,7 @@
 
     // ===== 返回选择 =====
     function backToPicker() {
+      stopCountdown();
       document.getElementById('picker').style.display = 'block';
       document.getElementById('content').style.display = 'none';
       words = [];
