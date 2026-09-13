@@ -86,6 +86,13 @@
       width: 100%;
       margin-top: 8px;
     }
+    .btn-difficult {
+      background: #fff;
+      color: #d97706;
+      border: 1px solid #d97706;
+      width: 100%;
+      margin-top: 8px;
+    }
     .btn-relearn {
       background: #fff;
       color: #2563eb;
@@ -106,6 +113,15 @@
       margin-top: 16px;
     }
     .loading { font-size: 16px; color: #999; }
+    .mode-tag {
+      display: inline-block;
+      font-size: 12px;
+      color: #d97706;
+      background: #fef3c7;
+      padding: 2px 10px;
+      border-radius: 10px;
+      margin-bottom: 12px;
+    }
   </style>
 </head>
 <body>
@@ -118,6 +134,7 @@
         <option value="">选择词书...</option>
       </select>
       <button class="btn btn-primary" onclick="startLearning()">开始学习</button>
+      <button class="btn btn-difficult" onclick="startDifficult()">复习不认识词</button>
       <button class="btn btn-reset" onclick="resetWordbook()">重置本词书进度</button>
     </div>
 
@@ -125,12 +142,13 @@
   </div>
 
   <script type="module">
-    import { FSRS, Rating, createEmptyCard } from 'https://esm.sh/ts-fsrs@4.5.0';
+    import { FSRS, Rating } from 'https://cdn.jsdelivr.net/npm/ts-fsrs@4.5.0/+esm';
 
     const fsrs = new FSRS();
 
     let allWordbooks = [];
     let currentWordbookId = null;
+    let currentMode = 'due'; // 'due' 或 'difficult'
     let words = [];
     let currentIndex = 0;
     let currentCard = null;
@@ -168,20 +186,62 @@
         });
     });
 
-    // ===== 开始学习 =====
+    // ===== 开始学习（待复习） =====
     async function startLearning() {
       const bookId = document.getElementById('bookSelect').value;
       if (!bookId) { alert('请先选择阶段和词书'); return; }
       currentWordbookId = Number(bookId);
+      currentMode = 'due';
       document.getElementById('picker').style.display = 'none';
       document.getElementById('content').style.display = 'block';
       document.getElementById('content').innerHTML = '<div class="loading">加载中...</div>';
-      await loadDueWords();
+      await loadWords();
     }
 
-    // ===== 加载今日待复习单词 =====
-    async function loadDueWords() {
+    // ===== 复习不认识词 =====
+    async function startDifficult() {
+      const bookId = document.getElementById('bookSelect').value;
+      if (!bookId) { alert('请先选择阶段和词书'); return; }
+      currentWordbookId = Number(bookId);
+      currentMode = 'difficult';
+      document.getElementById('picker').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      document.getElementById('content').innerHTML = '<div class="loading">加载中...</div>';
+      await loadWords();
+    }
+
+    // ===== 加载单词列表 =====
+    async function loadWords() {
+      const url = currentMode === 'difficult'
+        ? `/api/difficult?wordbook_id=${currentWordbookId}`
+        : `/api/due?wordbook_id=${currentWordbookId}`;
+
+      const res = await fetch(url);
+      const data = await res.json();
+      words = data.words || [];
+
+      if (words.length === 0) {
+        const msg = currentMode === 'difficult'
+          ? '🎉 没有不认识的词！'
+          : '🎉 今日复习完成！';
+        document.getElementById('content').innerHTML =
+          `<div class="done">${msg}</div><div class="back" onclick="backToPicker()">← 返回选择</div>`;
+        return;
+      }
+
+      currentIndex = 0;
+      renderFrame();
+      renderWord();
+    }
+
+    // ===== 渲染界面框架 =====
+    function renderFrame() {
+      const tag = currentMode === 'difficult'
+        ? '<div class="mode-tag">复习不认识词</div>'
+        : '';
+
       document.getElementById('content').innerHTML = `
+        ${tag}
         <div class="word" id="word"></div>
         <div class="phonetic" id="phonetic"></div>
         <div class="meaning" id="meaning"></div>
@@ -194,26 +254,14 @@
         <div class="progress" id="progress"></div>
         <div class="back" onclick="backToPicker()">← 返回选择</div>
       `;
-
-      const res = await fetch(`/api/due?wordbook_id=${currentWordbookId}`);
-      const data = await res.json();
-      words = data.words || [];
-
-      if (words.length === 0) {
-        document.getElementById('content').innerHTML =
-          '<div class="done">🎉 今日复习完成！</div><div class="back" onclick="backToPicker()">← 返回选择</div>';
-        return;
-      }
-
-      currentIndex = 0;
-      renderWord();
     }
 
     // ===== 渲染当前单词 =====
     function renderWord() {
       if (currentIndex >= words.length) {
+        const msg = currentMode === 'difficult' ? '🎉 错词复习完成！' : '🎉 本轮完成！';
         document.getElementById('content').innerHTML =
-          '<div class="done">🎉 本轮完成！</div><div class="back" onclick="backToPicker()">← 返回选择</div>';
+          `<div class="done">${msg}</div><div class="back" onclick="backToPicker()">← 返回选择</div>`;
         return;
       }
 
@@ -231,7 +279,16 @@
           last_review: w.last_review ? new Date(w.last_review) : new Date(),
         };
       } else {
-        currentCard = createEmptyCard();
+        currentCard = {
+          due: new Date(),
+          stability: 0,
+          difficulty: 0,
+          elapsed_days: 0,
+          scheduled_days: 0,
+          reps: 0,
+          state: 0,
+          last_review: undefined,
+        };
       }
 
       document.getElementById('word').textContent = w.word;
@@ -281,6 +338,17 @@
 
         currentCard = updatedCard;
         currentIndex++;
+
+        // 在错词模式下，如果标记“认识”，从当前列表中移除
+        if (currentMode === 'difficult' && rating !== 1) {
+          words.splice(currentIndex - 1, 1);
+          currentIndex--;
+          if (words.length === 0) {
+            renderWord();
+            return;
+          }
+        }
+
         renderWord();
       } catch (err) {
         console.error('复习保存失败:', err);
@@ -326,7 +394,7 @@
         }),
       });
 
-      await loadDueWords();
+      await loadWords();
     }
 
     // ===== 返回选择 =====
@@ -340,7 +408,7 @@
 
     // ===== 挂到 window =====
     Object.assign(window, {
-      startLearning, backToPicker, showMeaning, markKnown, markUnknown,
+      startLearning, startDifficult, backToPicker, showMeaning, markKnown, markUnknown,
       resetWordbook, relearnCurrent
     });
 
