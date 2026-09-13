@@ -9,7 +9,7 @@ export async function onRequestGet(context) {
       WHERE wordbook_id = ? 
         AND (due IS NULL OR due <= ?)
       ORDER BY due ASC
-      LIMIT 20`)
+      LIMIT 1000`)  //重置本书进度1000个单词量
     .bind(wordbookId, today)
     .all();
 
