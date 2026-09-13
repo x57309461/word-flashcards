@@ -79,6 +79,20 @@
     .btn-group.show { display: flex; }
     .btn-known { background: #16a34a; color: #fff; flex: 1; }
     .btn-unknown { background: #dc2626; color: #fff; flex: 1; }
+    .btn-reset {
+      background: #fff;
+      color: #dc2626;
+      border: 1px solid #dc2626;
+      width: 100%;
+      margin-top: 8px;
+    }
+    .btn-relearn {
+      background: #fff;
+      color: #2563eb;
+      border: 1px solid #2563eb;
+      width: 100%;
+      margin-top: 12px;
+    }
     .progress {
       font-size: 14px;
       color: #999;
@@ -104,20 +118,10 @@
         <option value="">选择词书...</option>
       </select>
       <button class="btn btn-primary" onclick="startLearning()">开始学习</button>
+      <button class="btn btn-reset" onclick="resetWordbook()">重置本词书进度</button>
     </div>
 
-    <div id="content" style="display:none;">
-      <div class="word" id="word"></div>
-      <div class="phonetic" id="phonetic"></div>
-      <div class="meaning" id="meaning"></div>
-      <button class="btn btn-primary" id="showBtn" onclick="showMeaning()">显示释义</button>
-      <div class="btn-group" id="btnGroup">
-        <button class="btn btn-known" onclick="markKnown()">认识</button>
-        <button class="btn btn-unknown" onclick="markUnknown()">不认识</button>
-      </div>
-      <div class="progress" id="progress"></div>
-      <div class="back" onclick="backToPicker()">← 返回选择</div>
-    </div>
+    <div id="content" style="display:none;"></div>
   </div>
 
   <script type="module">
@@ -177,7 +181,6 @@
 
     // ===== 加载今日待复习单词 =====
     async function loadDueWords() {
-      // 恢复 content 的初始结构
       document.getElementById('content').innerHTML = `
         <div class="word" id="word"></div>
         <div class="phonetic" id="phonetic"></div>
@@ -187,6 +190,7 @@
           <button class="btn btn-known" onclick="markKnown()">认识</button>
           <button class="btn btn-unknown" onclick="markUnknown()">不认识</button>
         </div>
+        <button class="btn btn-relearn" id="relearnBtn" style="display:none;" onclick="relearnCurrent()">重新学习这个词</button>
         <div class="progress" id="progress"></div>
         <div class="back" onclick="backToPicker()">← 返回选择</div>
       `;
@@ -236,6 +240,7 @@
       document.getElementById('meaning').classList.remove('show');
       document.getElementById('showBtn').style.display = 'block';
       document.getElementById('btnGroup').classList.remove('show');
+      document.getElementById('relearnBtn').style.display = 'block';
       document.getElementById('progress').textContent =
         `${currentIndex + 1} / ${words.length}`;
     }
@@ -245,6 +250,7 @@
       document.getElementById('meaning').classList.add('show');
       document.getElementById('showBtn').style.display = 'none';
       document.getElementById('btnGroup').classList.add('show');
+      document.getElementById('relearnBtn').style.display = 'none';
     }
 
     // ===== 认识 / 不认识 =====
@@ -282,6 +288,47 @@
       }
     }
 
+    // ===== 重置整本词书进度 =====
+    async function resetWordbook() {
+      const bookId = document.getElementById('bookSelect').value;
+      if (!bookId) { alert('请先选择词书'); return; }
+      if (!confirm('确定要清空这本词书的全部学习进度吗？')) return;
+
+      const res = await fetch('/api/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wordbookId: Number(bookId) }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('进度已重置');
+      } else {
+        alert('重置失败：' + (data.error || '未知错误'));
+      }
+    }
+
+    // ===== 重新学习当前这个词 =====
+    async function relearnCurrent() {
+      const w = words[currentIndex];
+      if (!w) return;
+
+      await fetch('/api/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wordId: w.id,
+          rating: Rating.Again,
+          due: new Date().toISOString(),
+          stability: 0,
+          difficulty: 0,
+          reps: 0,
+          state: 0,
+        }),
+      });
+
+      await loadDueWords();
+    }
+
     // ===== 返回选择 =====
     function backToPicker() {
       document.getElementById('picker').style.display = 'block';
@@ -291,9 +338,10 @@
       currentCard = null;
     }
 
-    // ===== 挂到 window（因为 module 作用域不是全局） =====
+    // ===== 挂到 window =====
     Object.assign(window, {
-      startLearning, backToPicker, showMeaning, markKnown, markUnknown
+      startLearning, backToPicker, showMeaning, markKnown, markUnknown,
+      resetWordbook, relearnCurrent
     });
 
     // ===== 初始化 =====
